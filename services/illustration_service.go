@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"net/url"
 	"open-illustrations-go/config"
 	"open-illustrations-go/models"
 	"time"
@@ -38,7 +39,7 @@ func DeleteIllustration(id string) error {
 // Generate presigned download URL from MinIO
 func GetDownloadURL(fileName string, duration time.Duration) (string, error) {
 	ctx := context.Background()
-	reqParams := make(map[string]string)
+	reqParams := make(url.Values)
 
 	url, err := config.MinioClient.PresignedGetObject(ctx, config.BucketName, fileName, duration, reqParams)
 	if err != nil {

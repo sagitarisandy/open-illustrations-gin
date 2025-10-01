@@ -1,6 +1,6 @@
-package modelsgo
+package models
 
-type illustrations struct {
+type Illustration struct {
 	ID       string `json:"id"`
 	Title    string `json:"title"`
 	Category string `json:"category"`
