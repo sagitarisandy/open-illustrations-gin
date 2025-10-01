@@ -3,19 +3,27 @@ package config
 import (
 	"context"
 	"log"
+	"os"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+
+	"github.com/joho/godotenv"
 )
 
 var MinioClient *minio.Client
 var BucketName = "illustrations"
 
 func InitMinio() {
-	endpoint := "VPS_IP"
-	accessKey := "ACCESS_KEY"
-	secretKey := "SECRET_KEY"
-	useSSL := false
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("Warning: .env file is not found")
+	}
+
+	endpoint := os.Getenv("MINIO_ENDPOINT")
+	accessKey := os.Getenv("MINIO_ROOT_USER")
+	secretKey := os.Getenv("MINIO_ROOT_PASSWORD")
+	useSSL := os.Getenv("MINIO_USE_SSL") == "true"
 
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV2(accessKey, secretKey, ""),

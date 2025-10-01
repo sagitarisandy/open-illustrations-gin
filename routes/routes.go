@@ -16,5 +16,5 @@ func RegisterRoutes(r *gin.Engine) {
 	api.GET("/illustrations/:id/download", controllers.Download)
 
 	api.GET("/info/about", controllers.About)
-	api.GET("/info/about", controllers.License)
+	api.GET("/info/license", controllers.License)
 }
