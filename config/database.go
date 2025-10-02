@@ -14,29 +14,32 @@ import (
 var DB *gorm.DB
 
 func InitDatabase() {
-	err := godotenv.Load()
-
-	if err != nil {
-		log.Println("No .env file found")
-	}
+	_ = godotenv.Load()
 
 	dbUser := os.Getenv("DB_USER")
 	dbPass := os.Getenv("DB_PASS")
 	dbHost := os.Getenv("DB_HOST")
 	dbPort := os.Getenv("DB_PORT")
-	dbName := os.Getenv("DB_NAME")
+	dbName := os.Getenv("DB_NAME") // <- pastikan .env: DB_NAME=openillustrations
 
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
 		dbUser, dbPass, dbHost, dbPort, dbName)
+
+	log.Printf("[DB] Using DSN: %s@tcp(%s:%s)/%s", dbUser, dbHost, dbPort, dbName)
+
+	var err error
 	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// migrate mode
+	// print semua SQL saat dev
+	DB = DB.Debug()
+
+	// migrate (aman walau tabel sudah ada)
 	if err := DB.AutoMigrate(&models.Illustration{}); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
 
-	fmt.Println("Connected to mysql & migrated models")
+	log.Println("Connected to MySQL & migrated models")
 }

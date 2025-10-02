@@ -2,16 +2,15 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"net/url"
+	"time"
+
 	"open-illustrations-go/config"
 	"open-illustrations-go/models"
-	"time"
-)
 
-// var illustrations = []models.Illustration {
-// 	{ID: "1", Title: "Team Work", Category: "Business", FileName: "teamwork.svg"},
-// 	{ID: "2", Title: "Coding", Category: "Technology", FileName: "coding.svg"},
-// }
+	"github.com/minio/minio-go/v7"
+)
 
 func GetIllustrations() ([]models.Illustration, error) {
 	var illustrations []models.Illustration
@@ -28,7 +27,28 @@ func GetIllustration(id string) (*models.Illustration, error) {
 	return &illustration, nil
 }
 
+// cek apakah object ada di MinIO
+func minioObjectExists(objectName string) (bool, error) {
+	_, err := config.MinioClient.StatObject(context.Background(), config.BucketName, objectName, minio.StatObjectOptions{})
+	if err != nil {
+		// jika not found, MinIO akan balikin error; treat as not exists
+		// bisa diperkaya dengan type assertion ke minio.ErrorResponse bila perlu
+		return false, nil
+	}
+	return true, nil
+}
+
 func CreateIllustration(ill *models.Illustration) error {
+	// validasi: file harus sudah ada di MinIO
+	ok, err := minioObjectExists(ill.FileName)
+	if err != nil {
+		return fmt.Errorf("minio check failed: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("file not found in MinIO bucket '%s': %s", config.BucketName, ill.FileName)
+	}
+
+	// simpan metadata ke MySQL
 	return config.DB.Create(ill).Error
 }
 
@@ -36,14 +56,13 @@ func DeleteIllustration(id string) error {
 	return config.DB.Delete(&models.Illustration{}, id).Error
 }
 
-// Generate presigned download URL from MinIO
 func GetDownloadURL(fileName string, duration time.Duration) (string, error) {
 	ctx := context.Background()
 	reqParams := make(url.Values)
 
-	url, err := config.MinioClient.PresignedGetObject(ctx, config.BucketName, fileName, duration, reqParams)
+	u, err := config.MinioClient.PresignedGetObject(ctx, config.BucketName, fileName, duration, reqParams)
 	if err != nil {
 		return "", err
 	}
-	return url.String(), nil
+	return u.String(), nil
 }

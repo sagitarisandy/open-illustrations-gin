@@ -7,10 +7,11 @@ import (
 )
 
 func RegisterRoutes(r *gin.Engine) {
-	api := r.Group("/api")
+	api := r.Group("/api/v1")
 
 	api.GET("/illustrations", controllers.GetIllustrations)
-	api.GET("/illustrations/:id", controllers.GetIllustrations)
+	api.GET("/illustrations/upload", controllers.UploadIllustration)
+	api.POST("/illustrations/:id", controllers.GetIllustration)
 	api.POST("/illustrations", controllers.CreateIllustration)
 	api.DELETE("/illustrations/:id", controllers.DeleteIllustration)
 	api.GET("/illustrations/:id/download", controllers.Download)

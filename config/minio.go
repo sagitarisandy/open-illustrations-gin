@@ -4,47 +4,40 @@ import (
 	"context"
 	"log"
 	"os"
-
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
+	"strconv"
 
 	"github.com/joho/godotenv"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
 var MinioClient *minio.Client
-var BucketName = "illustrations"
+var BucketName = "illustrations" // boleh juga diambil dari env kalau mau
 
 func InitMinio() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Println("Warning: .env file is not found")
-	}
+	_ = godotenv.Load()
 
-	endpoint := os.Getenv("MINIO_ENDPOINT")
-	accessKey := os.Getenv("MINIO_ROOT_USER")
-	secretKey := os.Getenv("MINIO_ROOT_PASSWORD")
-	useSSL := os.Getenv("MINIO_USE_SSL") == "true"
+	endpoint := os.Getenv("MINIO_ENDPOINT")       // 127.0.0.1:9000
+	accessKey := os.Getenv("MINIO_ROOT_USER")     // dari .env kamu
+	secretKey := os.Getenv("MINIO_ROOT_PASSWORD") // dari .env kamu
+	useSSL, _ := strconv.ParseBool(os.Getenv("MINIO_USE_SSL"))
 
 	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV2(accessKey, secretKey, ""),
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""), // gunakan V4
 		Secure: useSSL,
 	})
 	if err != nil {
 		log.Fatalf("Error connect MinIO: %v", err)
 	}
-
 	MinioClient = client
 
-	// ensure bucket is available
 	ctx := context.Background()
-	exists, errBucket := client.BucketExists(ctx, BucketName)
-	if errBucket != nil {
-		log.Fatalf("Error check bucket: %v", errBucket)
+	exists, err := client.BucketExists(ctx, BucketName)
+	if err != nil {
+		log.Fatalf("Error check bucket: %v", err)
 	}
-
 	if !exists {
-		err = client.MakeBucket(ctx, BucketName, minio.MakeBucketOptions{Region: "us-east-1"})
-		if err != nil {
+		if err := client.MakeBucket(ctx, BucketName, minio.MakeBucketOptions{Region: "us-east-1"}); err != nil {
 			log.Fatalf("Error create bucket: %v", err)
 		}
 		log.Printf("Bucket %s created!", BucketName)

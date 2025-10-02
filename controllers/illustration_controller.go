@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"log"
 	"net/http"
 	"time"
 
@@ -9,6 +10,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+type CreateIllustrationDTO struct {
+	Title    string `json:"title" binding:"required"`
+	Category string `json:"category" binding:"required"`
+	FileName string `json:"file_name" binding:"required"`
+}
 
 func GetIllustrations(c *gin.Context) {
 	data, err := services.GetIllustrations()
@@ -30,11 +37,25 @@ func GetIllustration(c *gin.Context) {
 }
 
 func CreateIllustration(c *gin.Context) {
-	var input models.Illustration
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create"})
+	var dto CreateIllustrationDTO
+	if err := c.ShouldBindJSON(&dto); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload (make sure Content-Type: application/json)"})
 		return
 	}
+	// c.JSON(http.StatusCreated, gin.H{"data": input})
+
+	input := models.Illustration{
+		Title:    dto.Title,
+		Category: dto.Category,
+		FileName: dto.FileName,
+	}
+
+	if err := services.CreateIllustration(&input); err != nil {
+		log.Println("CreateIllustration DB/MINIO err:", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	c.JSON(http.StatusCreated, gin.H{"data": input})
 }
 
