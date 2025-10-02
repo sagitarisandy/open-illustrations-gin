@@ -20,7 +20,7 @@ func InitDatabase() {
 	dbPass := os.Getenv("DB_PASS")
 	dbHost := os.Getenv("DB_HOST")
 	dbPort := os.Getenv("DB_PORT")
-	dbName := os.Getenv("DB_NAME") // <- pastikan .env: DB_NAME=openillustrations
+	dbName := os.Getenv("DB_NAME")
 
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
 		dbUser, dbPass, dbHost, dbPort, dbName)
@@ -33,10 +33,8 @@ func InitDatabase() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// print semua SQL saat dev
 	DB = DB.Debug()
 
-	// migrate (aman walau tabel sudah ada)
 	if err := DB.AutoMigrate(&models.Illustration{}); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}

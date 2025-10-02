@@ -27,19 +27,15 @@ func GetIllustration(id string) (*models.Illustration, error) {
 	return &illustration, nil
 }
 
-// cek apakah object ada di MinIO
 func minioObjectExists(objectName string) (bool, error) {
 	_, err := config.MinioClient.StatObject(context.Background(), config.BucketName, objectName, minio.StatObjectOptions{})
 	if err != nil {
-		// jika not found, MinIO akan balikin error; treat as not exists
-		// bisa diperkaya dengan type assertion ke minio.ErrorResponse bila perlu
 		return false, nil
 	}
 	return true, nil
 }
 
 func CreateIllustration(ill *models.Illustration) error {
-	// validasi: file harus sudah ada di MinIO
 	ok, err := minioObjectExists(ill.FileName)
 	if err != nil {
 		return fmt.Errorf("minio check failed: %w", err)
@@ -48,7 +44,6 @@ func CreateIllustration(ill *models.Illustration) error {
 		return fmt.Errorf("file not found in MinIO bucket '%s': %s", config.BucketName, ill.FileName)
 	}
 
-	// simpan metadata ke MySQL
 	return config.DB.Create(ill).Error
 }
 
