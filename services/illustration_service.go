@@ -55,7 +55,6 @@ func MinioObjectExists(objectName string) (bool, error) {
 	if err != nil {
 		return false, nil
 	}
-
 	return true, nil
 }
 
@@ -87,12 +86,12 @@ func minioObjectExists(objectName string) (bool, error) {
 }
 
 func CreateIllustration(ill *models.Illustration) error {
-	ok, err := minioObjectExists(ill.FileName)
+	ok, err := minioObjectExists(ill.StorageKey)
 	if err != nil {
 		return fmt.Errorf("minio check failed: %w", err)
 	}
 	if !ok {
-		return fmt.Errorf("file not found in MinIO bucket '%s': %s", config.BucketName, ill.FileName)
+		return fmt.Errorf("file not found in MinIO bucket '%s': %s", config.BucketName, ill.StorageKey)
 	}
 
 	return config.DB.Create(ill).Error
@@ -102,11 +101,11 @@ func DeleteIllustration(id string) error {
 	return config.DB.Delete(&models.Illustration{}, id).Error
 }
 
-func GetDownloadURL(fileName string, duration time.Duration) (string, error) {
+func GetDownloadURL(storageKey string, duration time.Duration) (string, error) {
 	ctx := context.Background()
 	reqParams := make(url.Values)
 
-	u, err := config.MinioClient.PresignedGetObject(ctx, config.BucketName, fileName, duration, reqParams)
+	u, err := config.MinioClient.PresignedGetObject(ctx, config.BucketName, storageKey, duration, reqParams)
 	if err != nil {
 		return "", err
 	}

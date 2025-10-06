@@ -1,11 +1,13 @@
 package models
 
-import "gorm.io/gorm"
+import "time"
 
 type Illustration struct {
-	gorm.Model
-	ID       uint   `json:"id" gorm:"primaryKey;autoIncrement"`
-	Title    string `json:"title" gorm:"type:varchar(191);not null"`
-	Category string `json:"category" gorm:"type:varchar(191);not null"`
-	FileName string `json:"file_name" gorm:"type:varchar(191);not null;uniqueIndex"`
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	Title      string    `gorm:"size:200;not null" json:"title"`
+	Category   string    `gorm:"size:100;not null;index" json:"category"`
+	FileName   string    `gorm:"size:191;not null" json:"file_name"`
+	StorageKey string    `gorm:"size:191;not null;uniqueIndex" json:"storage_key"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }

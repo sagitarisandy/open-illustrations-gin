@@ -1,8 +1,13 @@
 package controllers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"log"
+	"mime/multipart"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,9 +18,10 @@ import (
 )
 
 type CreateIllustrationDTO struct {
-	Title    string `json:"title" binding:"required"`
-	Category string `json:"category" binding:"required"`
-	FileName string `json:"file_name" binding:"required"`
+	Title      string `json:"title" binding:"required"`
+	Category   string `json:"category" binding:"required"`
+	FileName   string `json:"file_name" binding:"required"`
+	StorageKey string `json:"storage_key"`
 }
 
 func GetIllustrations(c *gin.Context) {
@@ -104,8 +110,17 @@ func processUpload(c *gin.Context) {
 	}
 	defer f.Close()
 
+	// Validate SVG only (by extension + light content-type check)
+	if !isSVGFile(fh) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "only .svg files are allowed"})
+		return
+	}
+
+	// Generate unique storage key (random hex) while preserving original filename separately
+	storageKey := generateStorageKey(objectName)
+
 	// Jika sudah ada nama object yang sama -> tolak (hindari duplikat)
-	exists, err := services.MinioObjectExists(objectName)
+	exists, err := services.MinioObjectExists(storageKey)
 	if err != nil {
 		log.Println("check minio exists err:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "minio check failed"})
@@ -131,12 +146,12 @@ func processUpload(c *gin.Context) {
 	// c.JSON(http.StatusCreated, gin.H{"data": rec})
 
 	// upload ke MinIO
-	if err := services.UploadObject(objectName, f, fh.Size, fh.Header.Get("Content-Type")); err != nil {
+	if err := services.UploadObject(storageKey, f, fh.Size, fh.Header.Get("Content-Type")); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload to storage"})
 		return
 	}
 
-	rec := models.Illustration{Title: title, Category: category, FileName: objectName}
+	rec := models.Illustration{Title: title, Category: category, FileName: objectName, StorageKey: storageKey}
 	if err := services.CreateIllustration(&rec); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save record"})
 		return
@@ -165,10 +180,17 @@ func CreateIllustration(c *gin.Context) {
 	}
 	// c.JSON(http.StatusCreated, gin.H{"data": input})
 
+	storageKey := dto.StorageKey
+	if storageKey == "" {
+		// For JSON-based creation we expect the storage_key (object already uploaded via another service)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "storage_key is required when creating via JSON"})
+		return
+	}
 	input := models.Illustration{
-		Title:    dto.Title,
-		Category: dto.Category,
-		FileName: dto.FileName,
+		Title:      dto.Title,
+		Category:   dto.Category,
+		FileName:   dto.FileName,
+		StorageKey: storageKey,
 	}
 
 	if err := services.CreateIllustration(&input); err != nil {
@@ -196,10 +218,43 @@ func Download(c *gin.Context) {
 		return
 	}
 
-	url, err := services.GetDownloadURL(ill.FileName, time.Hour*1)
+	url, err := services.GetDownloadURL(ill.StorageKey, time.Hour*1)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate link"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"download_url": url})
+}
+
+// --- helpers ---
+func isSVGFile(fh *multipart.FileHeader) bool {
+	name := strings.ToLower(fh.Filename)
+	if !strings.HasSuffix(name, ".svg") {
+		return false
+	}
+	f, err := fh.Open()
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, 512)
+	n, _ := f.Read(buf)
+	snippet := strings.ToLower(string(buf[:n]))
+	if !strings.Contains(snippet, "<svg") {
+		return false
+	}
+	return true
+}
+
+func generateStorageKey(original string) string {
+	// random 8 bytes -> 16 hex chars + original ext
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return original // fallback
+	}
+	ext := filepath.Ext(original)
+	if ext == "" {
+		ext = ".svg" // default
+	}
+	return fmt.Sprintf("%s-%s%s", time.Now().Format("20060102"), hex.EncodeToString(b), ext)
 }
