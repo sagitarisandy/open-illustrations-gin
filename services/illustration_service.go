@@ -3,7 +3,10 @@ package services
 import (
 	"context"
 	"fmt"
+	"io"
+	"mime"
 	"net/url"
+	"path/filepath"
 	"time"
 
 	"open-illustrations-go/config"
@@ -11,6 +14,54 @@ import (
 
 	"github.com/minio/minio-go/v7"
 )
+
+// func UploadObject(objectName string, r io.Reader, size int64, contentType string) error {
+// 	_, err := config.MinioClient.PutObject(
+// 		context.Background(),
+// 		config.BucketName,
+// 		objectName,
+// 		r,
+// 		size,
+// 		minio.PutObjectOptions{ContentType: contentType},
+// 	)
+// 	return err
+// }
+
+func UploadObject(objectName string, r io.Reader, size int64, contentType string) error {
+	if contentType == "" {
+		if ext := filepath.Ext(objectName); ext != "" {
+			if ct := mime.TypeByExtension(ext); ct != "" {
+				contentType = ct
+			}
+		}
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+	}
+
+	_, err := config.MinioClient.PutObject(
+		context.Background(),
+		config.BucketName,
+		objectName,
+		r,
+		size,
+		minio.PutObjectOptions{ContentType: contentType},
+	)
+	return err
+}
+
+func MinioObjectExists(objectName string) (bool, error) {
+	_, err := config.MinioClient.StatObject(context.TODO(), config.BucketName, objectName, minio.StatObjectOptions{})
+	if err != nil {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func CreateIllustrationRecord(ill *models.Illustration) error {
+	return config.DB.Create(ill).Error
+}
 
 func GetIllustrations() ([]models.Illustration, error) {
 	var illustrations []models.Illustration
