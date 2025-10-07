@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,7 +20,8 @@ import (
 
 type CreateIllustrationDTO struct {
 	Title      string `json:"title" binding:"required"`
-	Category   string `json:"category" binding:"required"`
+	CategoryID *uint  `json:"category_id"`
+	PackID     *uint  `json:"pack_id"`
 	FileName   string `json:"file_name" binding:"required"`
 	StorageKey string `json:"storage_key"`
 }
@@ -41,6 +43,42 @@ func GetIllustration(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": ill})
+}
+
+func GetIllustrationURL(c *gin.Context) {
+	id := c.Param("id")
+	ill, err := services.GetIllustration(id)
+	if err != nil || ill == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "illustration not found"})
+		return
+	}
+
+	//Allow custom expires in seconds with cap
+	expSecStr := c.Query("expires")
+	exp := 15 * time.Minute
+	if expSecStr != "" {
+		if n, convErr := strconv.Atoi(expSecStr); convErr == nil && n > 0 {
+			if n > 3600 {
+				n = 3600 // cap 1h
+			}
+			exp = time.Duration(n) * time.Second
+		}
+	}
+
+	url, err := services.GetDownloadURL(ill.StorageKey, exp)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate url"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":          ill.ID,
+		"file_name":   ill.FileName,
+		"storage_key": ill.StorageKey,
+		"url":         url,
+		"expires_in":  int(exp.Seconds()),
+	})
+
 }
 
 // processUpload handles multipart form upload: fields => file, title, category, file_name(optional)
@@ -93,13 +131,15 @@ func processUpload(c *gin.Context) {
 		return
 	}
 	title := c.PostForm("title")
-	category := c.PostForm("category")
+	// category legacy removed
+	catIDStr := c.PostForm("category_id")
+	packIDStr := c.PostForm("pack_id")
 	objectName := c.PostForm("file_name")
 	if objectName == "" {
 		objectName = fh.Filename
 	}
-	if title == "" || category == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "form fields 'title' and 'category' are required"})
+	if title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "form field 'title' is required"})
 		return
 	}
 
@@ -147,11 +187,25 @@ func processUpload(c *gin.Context) {
 
 	// upload ke MinIO
 	if err := services.UploadObject(storageKey, f, fh.Size, fh.Header.Get("Content-Type")); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload to storage"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload to storage", "detail": err.Error()})
 		return
 	}
 
-	rec := models.Illustration{Title: title, Category: category, FileName: objectName, StorageKey: storageKey}
+	var catIDPtr *uint
+	var packIDPtr *uint
+	if catIDStr != "" {
+		if v, err := strconv.ParseUint(catIDStr, 10, 64); err == nil {
+			vv := uint(v)
+			catIDPtr = &vv
+		}
+	}
+	if packIDStr != "" {
+		if v, err := strconv.ParseUint(packIDStr, 10, 64); err == nil {
+			vv := uint(v)
+			packIDPtr = &vv
+		}
+	}
+	rec := models.Illustration{Title: title, CategoryID: catIDPtr, PackID: packIDPtr, FileName: objectName, StorageKey: storageKey}
 	if err := services.CreateIllustration(&rec); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save record"})
 		return
@@ -188,7 +242,8 @@ func CreateIllustration(c *gin.Context) {
 	}
 	input := models.Illustration{
 		Title:      dto.Title,
-		Category:   dto.Category,
+		CategoryID: dto.CategoryID,
+		PackID:     dto.PackID,
 		FileName:   dto.FileName,
 		StorageKey: storageKey,
 	}

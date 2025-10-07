@@ -64,13 +64,17 @@ func CreateIllustrationRecord(ill *models.Illustration) error {
 
 func GetIllustrations() ([]models.Illustration, error) {
 	var illustrations []models.Illustration
-	result := config.DB.Find(&illustrations)
+	result := config.DB.
+		Preload("CategoryRef").
+		Preload("PackRef").
+		Where("deleted_at IS NULL").
+		Find(&illustrations)
 	return illustrations, result.Error
 }
 
 func GetIllustration(id string) (*models.Illustration, error) {
 	var illustration models.Illustration
-	result := config.DB.First(&illustration, id)
+	result := config.DB.Preload("CategoryRef").Preload("PackRef").First(&illustration, id)
 	if result.Error != nil {
 		return nil, result.Error
 	}
