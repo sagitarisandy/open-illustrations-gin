@@ -85,6 +85,132 @@ func GetIllustrations(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
+// GetIllustrationsByCategory handles GET /api/v1/categories/:id/illustrations
+func GetIllustrationsByCategory(c *gin.Context) {
+	includePresign := c.Query("include_presign") == "1"
+	id := c.Param("id")
+
+	data, err := services.GetIllustrationsByCategory(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var exp time.Duration
+	if includePresign {
+		exp = services.PresignTTL()
+	}
+	out := make([]gin.H, 0, len(data))
+	for _, ill := range data {
+		item := gin.H{
+			"id": ill.ID, "title": ill.Title, "style_id": ill.StyleID,
+			"category_id": ill.CategoryID, "pack_id": ill.PackID,
+			"file_name": ill.FileName, "is_premium": ill.IsPremium,
+			"created_at": ill.CreatedAt, "updated_at": ill.UpdatedAt,
+		}
+		if ill.IsPremium {
+			var url string
+			if includePresign {
+				if u, err := services.GetDownloadURL(ill.StorageKey, exp); err == nil {
+					url = u
+				}
+			}
+			if url == "" {
+				if tok, err := services.GenerateAssetToken(ill.StorageKey, 15*time.Minute); err == nil {
+					url = "/api/v1/i/" + tok
+				}
+			}
+			if url == "" {
+				url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
+			}
+			item["image_url"] = url
+		} else {
+			item["image_url"] = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
+		}
+		out = append(out, item)
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
+}
+
+// GetIllustrationsByStyle handles GET /api/v1/styles/:id/illustrations
+func GetIllustrationsByStyle(c *gin.Context) {
+	includePresign := c.Query("include_presign") == "1"
+	id := c.Param("id")
+	data, err := services.GetIllustrationsByStyle(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var exp time.Duration
+	if includePresign {
+		exp = services.PresignTTL()
+	}
+	out := make([]gin.H, 0, len(data))
+	for _, ill := range data {
+		item := gin.H{"id": ill.ID, "title": ill.Title, "style_id": ill.StyleID, "category_id": ill.CategoryID, "pack_id": ill.PackID, "file_name": ill.FileName, "is_premium": ill.IsPremium, "created_at": ill.CreatedAt, "updated_at": ill.UpdatedAt}
+		if ill.IsPremium {
+			var url string
+			if includePresign {
+				if u, err := services.GetDownloadURL(ill.StorageKey, exp); err == nil {
+					url = u
+				}
+			}
+			if url == "" {
+				if tok, err := services.GenerateAssetToken(ill.StorageKey, 15*time.Minute); err == nil {
+					url = "/api/v1/i/" + tok
+				}
+			}
+			if url == "" {
+				url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
+			}
+			item["image_url"] = url
+		} else {
+			item["image_url"] = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
+		}
+		out = append(out, item)
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
+}
+
+// GetIllustrationsByPack handles GET /api/v1/packs/:id/illustrations
+func GetIllustrationsByPack(c *gin.Context) {
+	includePresign := c.Query("include_presign") == "1"
+	id := c.Param("id")
+	data, err := services.GetIllustrationsByPack(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var exp time.Duration
+	if includePresign {
+		exp = services.PresignTTL()
+	}
+	out := make([]gin.H, 0, len(data))
+	for _, ill := range data {
+		item := gin.H{"id": ill.ID, "title": ill.Title, "style_id": ill.StyleID, "category_id": ill.CategoryID, "pack_id": ill.PackID, "file_name": ill.FileName, "is_premium": ill.IsPremium, "created_at": ill.CreatedAt, "updated_at": ill.UpdatedAt}
+		if ill.IsPremium {
+			var url string
+			if includePresign {
+				if u, err := services.GetDownloadURL(ill.StorageKey, exp); err == nil {
+					url = u
+				}
+			}
+			if url == "" {
+				if tok, err := services.GenerateAssetToken(ill.StorageKey, 15*time.Minute); err == nil {
+					url = "/api/v1/i/" + tok
+				}
+			}
+			if url == "" {
+				url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
+			}
+			item["image_url"] = url
+		} else {
+			item["image_url"] = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
+		}
+		out = append(out, item)
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
+}
+
 func GetIllustration(c *gin.Context) {
 	id := c.Param("id")
 	ill, err := services.GetIllustration(id)

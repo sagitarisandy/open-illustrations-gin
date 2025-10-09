@@ -75,6 +75,39 @@ func GetIllustrations() ([]models.Illustration, error) {
 	return illustrations, result.Error
 }
 
+func GetIllustrationsByCategory(categoryID string) ([]models.Illustration, error) {
+	var illustrations []models.Illustration
+	result := config.DB.
+		Preload("CategoryRef").
+		Preload("PackRef").
+		Preload("StyleRef").
+		Where("deleted_at IS NULL AND category_id = ?", categoryID).
+		Find(&illustrations)
+	return illustrations, result.Error
+}
+
+func GetIllustrationsByStyle(styleID string) ([]models.Illustration, error) {
+	var illustrations []models.Illustration
+	result := config.DB.
+		Preload("CategoryRef").
+		Preload("PackRef").
+		Preload("StyleRef").
+		Where("deleted_at IS NULL AND style_id = ?", styleID).
+		Find(&illustrations)
+	return illustrations, result.Error
+}
+
+func GetIllustrationsByPack(packID string) ([]models.Illustration, error) {
+	var illustrations []models.Illustration
+	result := config.DB.
+		Preload("CategoryRef").
+		Preload("PackRef").
+		Preload("StyleRef").
+		Where("deleted_at IS NULL AND pack_id = ?", packID).
+		Find(&illustrations)
+	return illustrations, result.Error
+}
+
 func GetIllustration(id string) (*models.Illustration, error) {
 	var illustration models.Illustration
 	result := config.DB.

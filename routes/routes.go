@@ -31,17 +31,20 @@ func RegisterRoutes(r *gin.Engine) {
 	api.POST("/category", controllers.CreateCategory)
 	api.GET("/categories", controllers.GetCategories)
 	api.GET("/categories/:id", controllers.GetCategory)
+	api.GET("/categories/:id/illustrations", controllers.GetIllustrationsByCategory)
 	api.PUT("/categories/:id", controllers.DeleteCategory)
 
 	api.POST("/pack", controllers.CreatePack)
 	api.GET("/packs", controllers.GetPacks)
 	api.GET("/packs/:id", controllers.GetPack)
+	api.GET("/packs/:id/illustrations", controllers.GetIllustrationsByPack)
 	api.PUT("/packs/:id", controllers.DeletePack)
 	api.GET("/packs/:id/download", controllers.DownloadPacks)
 
 	api.POST("/styles", controllers.CreateStyle)
 	api.GET("/styles", controllers.GetStyles)
 	api.GET("/styles/:id", controllers.GetStyle)
+	api.GET("/styles/:id/illustrations", controllers.GetIllustrationsByStyle)
 	api.PUT("/styles/:id", controllers.UpdateStyle)
 	api.DELETE("/styles/:id", controllers.DeleteStyle)
 

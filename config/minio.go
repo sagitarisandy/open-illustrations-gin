@@ -12,18 +12,18 @@ import (
 )
 
 var MinioClient *minio.Client
-var BucketName = "illustrations" // boleh juga diambil dari env kalau mau
+var BucketName = os.Getenv("MINIO_BUCKET")
 
 func InitMinio() {
 	_ = godotenv.Load()
 
-	endpoint := os.Getenv("MINIO_ENDPOINT")       // 127.0.0.1:9000
-	accessKey := os.Getenv("MINIO_ROOT_USER")     // dari .env kamu
-	secretKey := os.Getenv("MINIO_ROOT_PASSWORD") // dari .env kamu
+	endpoint := os.Getenv("MINIO_ENDPOINT")
+	accessKey := os.Getenv("MINIO_ROOT_USER")
+	secretKey := os.Getenv("MINIO_ROOT_PASSWORD")
 	useSSL, _ := strconv.ParseBool(os.Getenv("MINIO_USE_SSL"))
 
 	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""), // gunakan V4
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: useSSL,
 	})
 	if err != nil {
