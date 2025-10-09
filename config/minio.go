@@ -12,10 +12,12 @@ import (
 )
 
 var MinioClient *minio.Client
-var BucketName = os.Getenv("MINIO_BUCKET")
+var BucketName string
 
 func InitMinio() {
 	_ = godotenv.Load()
+
+	BucketName = os.Getenv("MINIO_BUCKET")
 
 	endpoint := os.Getenv("MINIO_ENDPOINT")
 	accessKey := os.Getenv("MINIO_ROOT_USER")
