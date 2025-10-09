@@ -11,11 +11,22 @@ func RegisterRoutes(r *gin.Engine) {
 
 	api.GET("/illustrations", controllers.GetIllustrations)
 	api.POST("/illustrations/upload", controllers.UploadIllustration)
+
+	// Penting: letakkan sebelum /illustrations/:id agar tidak tertutup wildcard
+	// api.GET("/illustrations/file/:key", controllers.GetIllustrationFileURL)
+
+	api.GET("/illustrations/:id/file", controllers.GetIllustrationFileURLByID)
+
 	api.GET("/illustrations/:id", controllers.GetIllustration)
 	api.POST("/illustrations", controllers.CreateIllustration)
 	api.DELETE("/illustrations/:id", controllers.DeleteIllustration)
 	api.GET("/illustrations/:id/download", controllers.Download)
-	api.GET("/illustrations/:id/url", controllers.GetIllustrationURL)
+
+	// Public stream for non-premium assets by ID
+	api.GET("/illustrations/:id/public", controllers.StreamPublic)
+
+	// Asset streaming via signed token path
+	api.GET("/i/:token", controllers.StreamSigned)
 
 	api.POST("/category", controllers.CreateCategory)
 	api.GET("/categories", controllers.GetCategories)
@@ -27,6 +38,12 @@ func RegisterRoutes(r *gin.Engine) {
 	api.GET("/packs/:id", controllers.GetPack)
 	api.PUT("/packs/:id", controllers.DeletePack)
 	api.GET("/packs/:id/download", controllers.DownloadPacks)
+
+	api.POST("/styles", controllers.CreateStyle)
+	api.GET("/styles", controllers.GetStyles)
+	api.GET("/styles/:id", controllers.GetStyle)
+	api.PUT("/styles/:id", controllers.UpdateStyle)
+	api.DELETE("/styles/:id", controllers.DeleteStyle)
 
 	api.GET("/info/about", controllers.About)
 	api.GET("/info/license", controllers.License)

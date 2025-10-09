@@ -35,7 +35,7 @@ func InitDatabase() {
 
 	DB = DB.Debug()
 
-	if err := DB.AutoMigrate(&models.Illustration{}); err != nil {
+	if err := DB.AutoMigrate(&models.Category{}, &models.Pack{}, &models.Style{}, &models.Illustration{}); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
 

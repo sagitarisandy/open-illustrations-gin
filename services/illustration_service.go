@@ -6,7 +6,9 @@ import (
 	"io"
 	"mime"
 	"net/url"
+	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"open-illustrations-go/config"
@@ -67,6 +69,7 @@ func GetIllustrations() ([]models.Illustration, error) {
 	result := config.DB.
 		Preload("CategoryRef").
 		Preload("PackRef").
+		Preload("StyleRef").
 		Where("deleted_at IS NULL").
 		Find(&illustrations)
 	return illustrations, result.Error
@@ -74,7 +77,11 @@ func GetIllustrations() ([]models.Illustration, error) {
 
 func GetIllustration(id string) (*models.Illustration, error) {
 	var illustration models.Illustration
-	result := config.DB.Preload("CategoryRef").Preload("PackRef").First(&illustration, id)
+	result := config.DB.
+		Preload("CategoryRef").
+		Preload("PackRef").
+		Preload("StyleRef").
+		First(&illustration, id)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -114,4 +121,24 @@ func GetDownloadURL(storageKey string, duration time.Duration) (string, error) {
 		return "", err
 	}
 	return u.String(), nil
+}
+
+// PresignTTL returns the server-enforced TTL for presigned URLs.
+// It ignores any client-provided values and reads from PRESIGN_TTL_SECONDS env var.
+// Clamped to [60, 3600] seconds; defaults to 600 if unset/invalid.
+func PresignTTL() time.Duration {
+	v := os.Getenv("PRESIGN_TTL_SECONDS")
+	n := 600
+	if v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			n = parsed
+		}
+	}
+	if n < 60 {
+		n = 60
+	}
+	if n > 3600 {
+		n = 3600
+	}
+	return time.Duration(n) * time.Second
 }

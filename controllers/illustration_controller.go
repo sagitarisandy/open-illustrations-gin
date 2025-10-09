@@ -2,8 +2,11 @@ package controllers
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"mime/multipart"
 	"net/http"
@@ -20,6 +23,7 @@ import (
 
 type CreateIllustrationDTO struct {
 	Title      string `json:"title" binding:"required"`
+	StyleID    *uint  `json:"style_id"`
 	CategoryID *uint  `json:"category_id"`
 	PackID     *uint  `json:"pack_id"`
 	FileName   string `json:"file_name" binding:"required"`
@@ -27,12 +31,58 @@ type CreateIllustrationDTO struct {
 }
 
 func GetIllustrations(c *gin.Context) {
+	includePresign := c.Query("include_presign") == "1" // for premium items only
+
 	data, err := services.GetIllustrations()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": data})
+
+	// Presign TTL (server-enforced) computed only if needed
+	var exp time.Duration
+	if includePresign {
+		exp = services.PresignTTL()
+	}
+
+	out := make([]gin.H, 0, len(data))
+	for _, ill := range data {
+		item := gin.H{
+			"id":          ill.ID,
+			"title":       ill.Title,
+			"style_id":    ill.StyleID,
+			"category_id": ill.CategoryID,
+			"pack_id":     ill.PackID,
+			"file_name":   ill.FileName,
+			"is_premium":  ill.IsPremium,
+			"created_at":  ill.CreatedAt,
+			"updated_at":  ill.UpdatedAt,
+		}
+
+		// Decide a single image_url
+		if ill.IsPremium {
+			var url string
+			if includePresign {
+				if u, err := services.GetDownloadURL(ill.StorageKey, exp); err == nil {
+					url = u
+				}
+			}
+			if url == "" { // fallback to backend-signed token path
+				if tok, err := services.GenerateAssetToken(ill.StorageKey, 15*time.Minute); err == nil {
+					url = "/api/v1/i/" + tok
+				}
+			}
+			if url == "" { // last resort, public by id
+				url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
+			}
+			item["image_url"] = url
+		} else {
+			item["image_url"] = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
+		}
+
+		out = append(out, item)
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
 func GetIllustration(c *gin.Context) {
@@ -42,96 +92,107 @@ func GetIllustration(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": ill})
+	// Build single image_url based on premium flag
+	payload := gin.H{
+		"id":          ill.ID,
+		"title":       ill.Title,
+		"style_id":    ill.StyleID,
+		"category_id": ill.CategoryID,
+		"pack_id":     ill.PackID,
+		"file_name":   ill.FileName,
+		"is_premium":  ill.IsPremium,
+		"created_at":  ill.CreatedAt,
+		"updated_at":  ill.UpdatedAt,
+	}
+	// Decide image_url
+	var url string
+	if ill.IsPremium {
+		if c.Query("include_presign") == "1" {
+			exp := services.PresignTTL()
+			if u, err := services.GetDownloadURL(ill.StorageKey, exp); err == nil {
+				url = u
+			}
+		}
+		if url == "" { // fallback to backend token
+			if tok, err := services.GenerateAssetToken(ill.StorageKey, 15*time.Minute); err == nil {
+				url = "/api/v1/i/" + tok
+			}
+		}
+		if url == "" { // last resort
+			url = fmt.Sprintf("/api/v1/illustrations/%s/public", id)
+		}
+	} else {
+		url = fmt.Sprintf("/api/v1/illustrations/%s/public", id)
+	}
+	payload["image_url"] = url
+	c.JSON(http.StatusOK, gin.H{"data": payload})
 }
 
-func GetIllustrationURL(c *gin.Context) {
+// GetIllustrationFileURL returns a short-lived presigned URL for a given storage key
+// Route: GET /api/v1/illustrations/file/:key
+func GetIllustrationFileURL(c *gin.Context) {
+	key := c.Param("key")
+	if key == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing key"})
+		return
+	}
+
+	// Optional: ?expires=seconds (clamp 60..3600)
+	// Enforce server-side policy for presign TTL
+	exp := services.PresignTTL()
+
+	u, err := services.GetDownloadURL(key, exp)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// also include backend signed proxy path as a fallback that doesn't expose storage details
+	tok, _ := services.GenerateAssetToken(key, 15*time.Minute)
+	c.JSON(http.StatusOK, gin.H{
+		"url":        u,
+		"expires_in": int(exp.Seconds()),
+		"signed_url": "/api/v1/i/" + tok,
+	})
+}
+
+// GetIllustrationFileURLByID returns a short-lived presigned URL for an illustration by its numeric ID
+// Route: GET /api/v1/illustrations/:id/file
+func GetIllustrationFileURLByID(c *gin.Context) {
 	id := c.Param("id")
+	// lookup illustration to get its storage key
 	ill, err := services.GetIllustration(id)
 	if err != nil || ill == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "illustration not found"})
 		return
 	}
 
-	//Allow custom expires in seconds with cap
-	expSecStr := c.Query("expires")
-	exp := 15 * time.Minute
-	if expSecStr != "" {
-		if n, convErr := strconv.Atoi(expSecStr); convErr == nil && n > 0 {
-			if n > 3600 {
-				n = 3600 // cap 1h
-			}
-			exp = time.Duration(n) * time.Second
-		}
-	}
+	exp := services.PresignTTL()
 
-	url, err := services.GetDownloadURL(ill.StorageKey, exp)
+	u, err := services.GetDownloadURL(ill.StorageKey, exp)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate url"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
+	tok, _ := services.GenerateAssetToken(ill.StorageKey, 15*time.Minute)
 	c.JSON(http.StatusOK, gin.H{
-		"id":          ill.ID,
-		"file_name":   ill.FileName,
-		"storage_key": ill.StorageKey,
-		"url":         url,
-		"expires_in":  int(exp.Seconds()),
+		"url":        u,
+		"expires_in": int(exp.Seconds()),
+		"signed_url": "/api/v1/i/" + tok,
 	})
-
 }
+
+// Removed explicit GetIllustrationURL in favor of signed URL embedded responses
 
 // processUpload handles multipart form upload: fields => file, title, category, file_name(optional)
 func processUpload(c *gin.Context) {
-	// fHeader, err := c.FormFile("file")
-	// if err != nil {
-	// 	c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
-	// 	return
-	// }
-	// title := c.PostForm("title")
-	// category := c.PostForm("category")
-	// objectName := c.PostForm("file_name")
-	// if objectName == "" {
-	// 	objectName = fHeader.Filename
-	// }
-	// if title == "" || category == "" {
-	// 	c.JSON(http.StatusBadRequest, gin.H{"error": "title and category are required"})
-	// 	return
-	// }
 
-	// file, err := fHeader.Open()
-	// if err != nil {
-	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to open file"})
-	// 	return
-	// }
-
-	// defer file.Close()
-
-	// if err := services.UploadObject(objectName, file, fHeader.Size, fHeader.Header.Get("Content-Type")); err != nil {
-	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload to MinIO"})
-	// 	return
-	// }
-
-	// rec := models.Illustration{
-	// 	Title:    title,
-	// 	Category: category,
-	// 	FileName: objectName,
-	// }
-	// if err := services.CreateIllustrationRecord(&rec); err != nil {
-	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save record"})
-	// 	return
-	// }
-
-	// c.JSON(http.StatusCreated, gin.H{"data": rec})
-
-	// form-data: file (File), title (Text), category (Text), file_name (Text, optional)
 	fh, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "form field 'file' is required"})
 		return
 	}
 	title := c.PostForm("title")
-	// category legacy removed
+	styleIDStr := c.PostForm("style_id")
 	catIDStr := c.PostForm("category_id")
 	packIDStr := c.PostForm("pack_id")
 	objectName := c.PostForm("file_name")
@@ -171,20 +232,6 @@ func processUpload(c *gin.Context) {
 		return
 	}
 
-	// Simpan metadata ke MySQL
-	// rec := models.Illustration{
-	// 	Title:    title,
-	// 	Category: category,
-	// 	FileName: objectName,
-	// }
-	// if err := services.CreateIllustration(&rec); err != nil {
-	// 	log.Println("db insert err:", err)
-	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save record"})
-	// 	return
-	// }
-
-	// c.JSON(http.StatusCreated, gin.H{"data": rec})
-
 	// upload ke MinIO
 	if err := services.UploadObject(storageKey, f, fh.Size, fh.Header.Get("Content-Type")); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload to storage", "detail": err.Error()})
@@ -192,11 +239,18 @@ func processUpload(c *gin.Context) {
 	}
 
 	var catIDPtr *uint
+	var styleIDPtr *uint
 	var packIDPtr *uint
 	if catIDStr != "" {
 		if v, err := strconv.ParseUint(catIDStr, 10, 64); err == nil {
 			vv := uint(v)
 			catIDPtr = &vv
+		}
+	}
+	if styleIDStr != "" {
+		if v, err := strconv.ParseUint(styleIDStr, 10, 64); err == nil {
+			u := uint(v)
+			styleIDPtr = &u
 		}
 	}
 	if packIDStr != "" {
@@ -205,8 +259,16 @@ func processUpload(c *gin.Context) {
 			packIDPtr = &vv
 		}
 	}
-	rec := models.Illustration{Title: title, CategoryID: catIDPtr, PackID: packIDPtr, FileName: objectName, StorageKey: storageKey}
+	rec := models.Illustration{
+		Title:      title,
+		StyleID:    styleIDPtr,
+		CategoryID: catIDPtr,
+		PackID:     packIDPtr,
+		FileName:   objectName,
+		StorageKey: storageKey,
+	}
 	if err := services.CreateIllustration(&rec); err != nil {
+		log.Println("db insert err:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save record"})
 		return
 	}
@@ -242,6 +304,7 @@ func CreateIllustration(c *gin.Context) {
 	}
 	input := models.Illustration{
 		Title:      dto.Title,
+		StyleID:    dto.StyleID,
 		CategoryID: dto.CategoryID,
 		PackID:     dto.PackID,
 		FileName:   dto.FileName,
@@ -281,6 +344,75 @@ func Download(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"download_url": url})
 }
 
+// StreamSigned serves image via backend using signed token path: /api/v1/i/:token
+func StreamSigned(c *gin.Context) {
+	token := c.Param("token")
+	storageKey, err := services.ParseAndValidateAssetToken(token)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
+		return
+	}
+	obj, ct, reader, err := services.GetObjectStream(storageKey)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "object not found"})
+		return
+	}
+	defer obj.Close()
+
+	if ct == "" || !strings.Contains(ct, "svg") {
+		ct = "image/svg+xml"
+	}
+
+	sum := sha256.Sum256([]byte(storageKey))
+	etag := base64.RawURLEncoding.EncodeToString(sum[:8])
+	if inm := c.GetHeader("If-None-Match"); inm != "" && inm == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	c.Header("Content-Type", ct)
+	c.Header("Cache-Control", "public, max-age=900")
+	c.Header("ETag", etag)
+	c.Header("Content-Disposition", "inline; filename=\""+storageKey+"\"")
+	c.Header("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'")
+	_, _ = io.Copy(c.Writer, reader)
+}
+
+// StreamPublic serves non-premium images publicly by illustration ID: /api/v1/illustrations/:id/public
+func StreamPublic(c *gin.Context) {
+	id := c.Param("id")
+	ill, err := services.GetIllustration(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	if ill.IsPremium {
+		c.JSON(http.StatusForbidden, gin.H{"error": "premium content is not publicly accessible"})
+		return
+	}
+	obj, ct, reader, err := services.GetObjectStream(ill.StorageKey)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "object not found"})
+		return
+	}
+	defer obj.Close()
+
+	if ct == "" || !strings.Contains(ct, "svg") {
+		ct = "image/svg+xml"
+	}
+	sum := sha256.Sum256([]byte(ill.StorageKey))
+	etag := base64.RawURLEncoding.EncodeToString(sum[:8])
+	if inm := c.GetHeader("If-None-Match"); inm != "" && inm == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	c.Header("Content-Type", ct)
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("ETag", etag)
+	c.Header("Content-Disposition", "inline; filename=\""+ill.FileName+"\"")
+	c.Header("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'")
+	_, _ = io.Copy(c.Writer, reader)
+}
+
 // --- helpers ---
 func isSVGFile(fh *multipart.FileHeader) bool {
 	name := strings.ToLower(fh.Filename)
@@ -295,10 +427,7 @@ func isSVGFile(fh *multipart.FileHeader) bool {
 	buf := make([]byte, 512)
 	n, _ := f.Read(buf)
 	snippet := strings.ToLower(string(buf[:n]))
-	if !strings.Contains(snippet, "<svg") {
-		return false
-	}
-	return true
+	return strings.Contains(snippet, "<svg")
 }
 
 func generateStorageKey(original string) string {
