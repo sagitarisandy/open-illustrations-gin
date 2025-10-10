@@ -15,7 +15,6 @@ import (
 	"open-illustrations-go/models"
 
 	"github.com/minio/minio-go/v7"
-	"gorm.io/gorm"
 )
 
 // func UploadObject(objectName string, r io.Reader, size int64, contentType string) error {
@@ -65,30 +64,15 @@ func CreateIllustrationRecord(ill *models.Illustration) error {
 	return config.DB.Create(ill).Error
 }
 
-func GetIllustrations(id string) (*models.Illustration, error) {
-	var illustrations models.Illustration
-	// result := config.DB.
-	// 	Preload("CategoryRef").
-	// 	Preload("PackRef").
-	// 	Preload("StyleRef").
-	// 	Where("deleted_at IS NULL").
-	// 	Find(&illustrations)
-	// return illustrations, result.Error
-
-	// Parse id ke uint agar GORM pakai PK tanpa cast string
-	uid, err := strconv.ParseUint(id, 10, 64)
-	if err != nil {
-		return nil, gorm.ErrRecordNotFound
-	}
-
-	// Ambil kolom seperlunya + hilangkan ORDER BY defaul (pakai Take)
-	err = config.DB.
-		Select("id", "title", "style_id", "category_id", "pack_id", "file_name", "storage_key", "is_premium", "created_at", "updated_at").
-		Take(&illustrations, uid).Error
-	if err != nil {
-		return nil, err
-	}
-	return &illustrations, nil
+func GetIllustrations() ([]models.Illustration, error) {
+	var illustrations []models.Illustration
+	result := config.DB.
+		Preload("CategoryRef").
+		Preload("PackRef").
+		Preload("StyleRef").
+		Where("deleted_at IS NULL").
+		Find(&illustrations)
+	return illustrations, result.Error
 }
 
 func GetIllustrationsByCategory(categoryID string) ([]models.Illustration, error) {
