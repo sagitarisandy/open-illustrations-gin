@@ -32,8 +32,9 @@ type CreateIllustrationDTO struct {
 
 func GetIllustrations(c *gin.Context) {
 	includePresign := c.Query("include_presign") == "1" // for premium items only
+	query := c.Query("q")
 
-	data, err := services.GetIllustrations()
+	data, err := services.GetIllustrations(query)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -45,8 +46,9 @@ func GetIllustrations(c *gin.Context) {
 		exp = services.PresignTTL()
 	}
 
-	out := make([]gin.H, 0, len(data))
-	for _, ill := range data {
+	out := make([]gin.H, 0, 1)
+	if data != nil {
+		ill := data
 		item := gin.H{
 			"id":          ill.ID,
 			"title":       ill.Title,
