@@ -1,3 +1,11 @@
 .env
+.gitignore
 
-/minio_data
+minio_data
+mysql/
+/redis/data
+minio-data/
+redis/
+minio-config/
+
+*.log

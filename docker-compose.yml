@@ -1,13 +1,128 @@
 services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASS}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASS}
+    expose:
+      - "3306:3306"
+    volumes:
+      - ./mysql/data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          cpus: "0.40"
+          memory: 700M
+        reservations:
+          cpus: "0.20"
+          memory: 256M
+
   minio:
     image: minio/minio:latest
     container_name: minio
+    restart: unless-stopped
+    command: server /data --console-address ":9090"
+    expose:
+      - "9000"
     ports:
-      - "${MINIO_API_PORT}:9000"    # API port
-      - "${MINIO_CONSOLE_PORT}:9090"  # Console port
+      - "${MINIO_CONSOLE_PORT}:9090"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    command: server /data --console-address ":9090"
     volumes:
-      - ./minio_data:/data
+      - ./minio-data:/data
+      - ./minio-config:/root/.minio
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 400M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    expose:
+      - "6379"
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]  # ✅ fixed typo here
+    volumes:
+      - ./redis/data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: 150M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+
+  app:
+    build: .
+    container_name: open-illustrations-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASS}
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      mysql:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+      - public
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 500M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+
+networks:
+  internal:
+    driver: bridge
+  public:
+    driver: bridge
