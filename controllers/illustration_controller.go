@@ -10,6 +10,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -30,24 +31,46 @@ type CreateIllustrationDTO struct {
 	StorageKey string `json:"storage_key"`
 }
 
-func GetIllustrations(c *gin.Context) {
-	includePresign := c.Query("include_presign") == "1" // for premium items only
+// Only trusted internal callers may receive presigned URLs
+func isInternalRequest(c *gin.Context) bool {
+	secret := os.Getenv("INTERNAL_PRESIGN_SECRET")
+	return secret != "" && c.GetHeader("X-Internal-Request") == secret
+}
 
-	data, err := services.GetIllustrations()
+// LIST: GET /api/v1/illustrations
+func GetIllustrations(c *gin.Context) {
+	ills, err := services.GetIllustrations()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch illustrations"})
 		return
 	}
 
-	// Presign TTL (server-enforced) computed only if needed
-	var exp time.Duration
-	if includePresign {
-		exp = services.PresignTTL()
-	}
+	wantPresign := c.Query("include_presign") == "1" && isInternalRequest(c)
 
-	out := make([]gin.H, 0, len(data))
-	for _, ill := range data {
-		item := gin.H{
+	data := make([]gin.H, 0, len(ills))
+	for _, ill := range ills {
+		var url string
+
+		if ill.IsPremium {
+			if wantPresign {
+				if u, err := services.GetDownloadURL(ill.StorageKey, services.PresignTTL()); err == nil {
+					url = u
+				}
+			}
+			if url == "" {
+				if tok, err := services.GenerateAssetToken(ill.StorageKey, 15*time.Minute); err == nil {
+					url = "/api/v1/i/" + tok
+				} else {
+					url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
+				}
+			}
+		} else {
+			url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
+		}
+
+		url = makePublicURL(url)
+
+		data = append(data, gin.H{
 			"id":          ill.ID,
 			"title":       ill.Title,
 			"style_id":    ill.StyleID,
@@ -57,37 +80,18 @@ func GetIllustrations(c *gin.Context) {
 			"is_premium":  ill.IsPremium,
 			"created_at":  ill.CreatedAt,
 			"updated_at":  ill.UpdatedAt,
-		}
-
-		// Decide a single image_url
-		if ill.IsPremium {
-			var url string
-			if includePresign {
-				if u, err := services.GetDownloadURL(ill.StorageKey, exp); err == nil {
-					url = u
-				}
-			}
-			if url == "" { // fallback to backend-signed token path
-				if tok, err := services.GenerateAssetToken(ill.StorageKey, 15*time.Minute); err == nil {
-					url = "/api/v1/i/" + tok
-				}
-			}
-			if url == "" { // last resort, public by id
-				url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
-			}
-			item["image_url"] = url
-		} else {
-			item["image_url"] = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
-		}
-
-		out = append(out, item)
+			"image_url":   url,
+			// optional: expose storage_key if needed internally
+			// "storage_key": ill.StorageKey,
+		})
 	}
-	c.JSON(http.StatusOK, gin.H{"data": out})
+
+	c.JSON(http.StatusOK, gin.H{"data": data})
 }
 
 // GetIllustrationsByCategory handles GET /api/v1/categories/:id/illustrations
 func GetIllustrationsByCategory(c *gin.Context) {
-	includePresign := c.Query("include_presign") == "1"
+	wantPresign := c.Query("include_presign") == "1" && isInternalRequest(c)
 	id := c.Param("id")
 
 	data, err := services.GetIllustrationsByCategory(id)
@@ -95,37 +99,33 @@ func GetIllustrationsByCategory(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	var exp time.Duration
-	if includePresign {
-		exp = services.PresignTTL()
-	}
 	out := make([]gin.H, 0, len(data))
 	for _, ill := range data {
+		var url string
 		item := gin.H{
 			"id": ill.ID, "title": ill.Title, "style_id": ill.StyleID,
 			"category_id": ill.CategoryID, "pack_id": ill.PackID,
 			"file_name": ill.FileName, "is_premium": ill.IsPremium,
 			"created_at": ill.CreatedAt, "updated_at": ill.UpdatedAt,
 		}
+
 		if ill.IsPremium {
-			var url string
-			if includePresign {
-				if u, err := services.GetDownloadURL(ill.StorageKey, exp); err == nil {
+			if wantPresign {
+				if u, err := services.GetDownloadURL(ill.StorageKey, services.PresignTTL()); err == nil {
 					url = u
 				}
 			}
 			if url == "" {
 				if tok, err := services.GenerateAssetToken(ill.StorageKey, 15*time.Minute); err == nil {
 					url = "/api/v1/i/" + tok
+				} else {
+					url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
 				}
 			}
-			if url == "" {
-				url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
-			}
-			item["image_url"] = url
 		} else {
-			item["image_url"] = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
+			url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
 		}
+		item["image_url"] = makePublicURL(url)
 		out = append(out, item)
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
@@ -133,39 +133,34 @@ func GetIllustrationsByCategory(c *gin.Context) {
 
 // GetIllustrationsByStyle handles GET /api/v1/styles/:id/illustrations
 func GetIllustrationsByStyle(c *gin.Context) {
-	includePresign := c.Query("include_presign") == "1"
+	wantPresign := c.Query("include_presign") == "1" && isInternalRequest(c)
 	id := c.Param("id")
 	data, err := services.GetIllustrationsByStyle(id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	var exp time.Duration
-	if includePresign {
-		exp = services.PresignTTL()
-	}
 	out := make([]gin.H, 0, len(data))
 	for _, ill := range data {
 		item := gin.H{"id": ill.ID, "title": ill.Title, "style_id": ill.StyleID, "category_id": ill.CategoryID, "pack_id": ill.PackID, "file_name": ill.FileName, "is_premium": ill.IsPremium, "created_at": ill.CreatedAt, "updated_at": ill.UpdatedAt}
+		var url string
 		if ill.IsPremium {
-			var url string
-			if includePresign {
-				if u, err := services.GetDownloadURL(ill.StorageKey, exp); err == nil {
+			if wantPresign {
+				if u, err := services.GetDownloadURL(ill.StorageKey, services.PresignTTL()); err == nil {
 					url = u
 				}
 			}
 			if url == "" {
 				if tok, err := services.GenerateAssetToken(ill.StorageKey, 15*time.Minute); err == nil {
 					url = "/api/v1/i/" + tok
+				} else {
+					url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
 				}
 			}
-			if url == "" {
-				url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
-			}
-			item["image_url"] = url
 		} else {
-			item["image_url"] = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
+			url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
 		}
+		item["image_url"] = makePublicURL(url)
 		out = append(out, item)
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
@@ -173,44 +168,40 @@ func GetIllustrationsByStyle(c *gin.Context) {
 
 // GetIllustrationsByPack handles GET /api/v1/packs/:id/illustrations
 func GetIllustrationsByPack(c *gin.Context) {
-	includePresign := c.Query("include_presign") == "1"
+	wantPresign := c.Query("include_presign") == "1" && isInternalRequest(c)
 	id := c.Param("id")
 	data, err := services.GetIllustrationsByPack(id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	var exp time.Duration
-	if includePresign {
-		exp = services.PresignTTL()
-	}
 	out := make([]gin.H, 0, len(data))
 	for _, ill := range data {
 		item := gin.H{"id": ill.ID, "title": ill.Title, "style_id": ill.StyleID, "category_id": ill.CategoryID, "pack_id": ill.PackID, "file_name": ill.FileName, "is_premium": ill.IsPremium, "created_at": ill.CreatedAt, "updated_at": ill.UpdatedAt}
+		var url string
 		if ill.IsPremium {
-			var url string
-			if includePresign {
-				if u, err := services.GetDownloadURL(ill.StorageKey, exp); err == nil {
+			if wantPresign {
+				if u, err := services.GetDownloadURL(ill.StorageKey, services.PresignTTL()); err == nil {
 					url = u
 				}
 			}
 			if url == "" {
 				if tok, err := services.GenerateAssetToken(ill.StorageKey, 15*time.Minute); err == nil {
 					url = "/api/v1/i/" + tok
+				} else {
+					url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
 				}
 			}
-			if url == "" {
-				url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
-			}
-			item["image_url"] = url
 		} else {
-			item["image_url"] = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
+			url = fmt.Sprintf("/api/v1/illustrations/%d/public", ill.ID)
 		}
+		item["image_url"] = makePublicURL(url)
 		out = append(out, item)
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
+// DETAIL: GET /api/v1/illustrations/:id
 func GetIllustration(c *gin.Context) {
 	id := c.Param("id")
 	ill, err := services.GetIllustration(id)
@@ -218,7 +209,27 @@ func GetIllustration(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
-	// Build single image_url based on premium flag
+
+	wantPresign := c.Query("include_presign") == "1" && isInternalRequest(c)
+
+	var url string
+	if ill.IsPremium {
+		if wantPresign {
+			if u, err := services.GetDownloadURL(ill.StorageKey, services.PresignTTL()); err == nil {
+				url = u
+			}
+		}
+		if url == "" {
+			if tok, err := services.GenerateAssetToken(ill.StorageKey, 15*time.Minute); err == nil {
+				url = "/api/v1/i/" + tok
+			} else {
+				url = fmt.Sprintf("/api/v1/illustrations/%s/public", id)
+			}
+		}
+	} else {
+		url = fmt.Sprintf("/api/v1/illustrations/%s/public", id)
+	}
+
 	payload := gin.H{
 		"id":          ill.ID,
 		"title":       ill.Title,
@@ -229,28 +240,9 @@ func GetIllustration(c *gin.Context) {
 		"is_premium":  ill.IsPremium,
 		"created_at":  ill.CreatedAt,
 		"updated_at":  ill.UpdatedAt,
+		"image_url":   url,
 	}
-	// Decide image_url
-	var url string
-	if ill.IsPremium {
-		if c.Query("include_presign") == "1" {
-			exp := services.PresignTTL()
-			if u, err := services.GetDownloadURL(ill.StorageKey, exp); err == nil {
-				url = u
-			}
-		}
-		if url == "" { // fallback to backend token
-			if tok, err := services.GenerateAssetToken(ill.StorageKey, 15*time.Minute); err == nil {
-				url = "/api/v1/i/" + tok
-			}
-		}
-		if url == "" { // last resort
-			url = fmt.Sprintf("/api/v1/illustrations/%s/public", id)
-		}
-	} else {
-		url = fmt.Sprintf("/api/v1/illustrations/%s/public", id)
-	}
-	payload["image_url"] = url
+
 	c.JSON(http.StatusOK, gin.H{"data": payload})
 }
 
@@ -567,4 +559,15 @@ func generateStorageKey(original string) string {
 		ext = ".svg" // default
 	}
 	return fmt.Sprintf("%s-%s%s", time.Now().Format("20060102"), hex.EncodeToString(b), ext)
+}
+
+func makePublicURL(p string) string {
+	if strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://") {
+		return p
+	}
+	base := os.Getenv("API_PUBLIC_BASE_URL") // contoh: http://localhost:8080
+	if base == "" {
+		return p
+	}
+	return strings.TrimRight(base, "/") + p
 }

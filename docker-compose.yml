@@ -105,6 +105,8 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       MINIO_PUBLIC_BASE_URL: http://localhost:9000
+      INTERNAL_PRESIGN_SECRET: ${INTERNAL_PRESIGN_SECRET}
+      API_PUBLIC_BASE_URL: http://localhost:8080
     depends_on:
       mysql:
         condition: service_healthy
