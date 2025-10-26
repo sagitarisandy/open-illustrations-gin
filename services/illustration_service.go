@@ -15,6 +15,7 @@ import (
 	"open-illustrations-go/models"
 
 	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
 // func UploadObject(objectName string, r io.Reader, size int64, contentType string) error {
@@ -149,7 +150,23 @@ func GetDownloadURL(storageKey string, duration time.Duration) (string, error) {
 	ctx := context.Background()
 	reqParams := make(url.Values)
 
-	u, err := config.MinioClient.PresignedGetObject(ctx, config.BucketName, storageKey, duration, reqParams)
+	cli := config.MinioClient // default: endpoint internal (mini:9000)
+
+	// Jika MINIO_PUBLIC_BASE_URL diset (mis. http://localhost:9000), buat client khusus presign
+	if base := os.Getenv("MINIO_PUBLIC_BASE_URL"); base != "" {
+		if pub, err := url.Parse(base); err == nil && pub.Host != "" {
+			pubCli, err := minio.New(pub.Host, &minio.Options{
+				Creds:  credentials.NewStaticV4(os.Getenv("MINIO_ROOT_USER"), os.Getenv("MINIO_ROOT_PASSWORD"), ""),
+				Secure: pub.Scheme == "https",
+				Region: "us-east-1",
+			})
+			if err == nil {
+				cli = pubCli
+			}
+		}
+	}
+
+	u, err := cli.PresignedGetObject(ctx, config.BucketName, storageKey, duration, reqParams)
 	if err != nil {
 		return "", err
 	}
